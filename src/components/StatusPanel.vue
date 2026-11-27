@@ -109,12 +109,12 @@
             由 {{ store.finalSummary.doctorName }} 生成
           </div>
         </div>
-        <!-- <a-alert
+        <a-alert
           type="warning"
           show-icon
           message="【本内容仅供参考，身体不适尽早就医】"
           style="margin-bottom: 12px;"
-        /> -->
+        />
         <div class="case-brief">
           <div>患者姓名：{{ store.patientCase.name || "—" }}</div>
           <div>年龄：{{ store.patientCase.age ?? "—" }}</div>
@@ -139,7 +139,7 @@
 
 <script setup>
 import { computed, ref } from "vue";
-import { marked } from "marked";
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 import { message } from "ant-design-vue";
 
 import { useConsultStore } from "../store";
@@ -181,9 +181,9 @@ const winnerText = computed(() => {
 
 function renderMarkdown(text) {
   try {
-    return marked.parse(text || "");
+    return renderSafeMarkdown(text || "");
   } catch (e) {
-    return text;
+    return renderSafeMarkdown(String(text ?? ''))
   }
 }
 

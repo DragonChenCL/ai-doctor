@@ -184,7 +184,7 @@ export const useConsultStore = defineStore('consult', {
       }
       // 新的问诊开始时，所有医生恢复为在席状态，清空票数，并取消暂停
       this.doctors = this.doctors.map((d) => ({ ...d, status: 'active', votes: 0 }))
-      this.workflow.phase = 'discussion'
+      this.workflow = { phase: 'discussion', currentRound: 1, roundsWithoutElimination: 0, activeTurn: null, turnQueue: [], paused: false }
       this.workflow.currentRound = 1
       this.workflow.roundsWithoutElimination = 0
       this.workflow.paused = false
@@ -307,10 +307,10 @@ export const useConsultStore = defineStore('consult', {
         let reason = ''
 
         try {
-          // 如果无 API Key，则使用确定性的回退策略：自投
+          // 模拟回复不应计入真实评估。
           if (!voterDoc.apiKey) {
-            targetId = voterDoc.id
-            reason = '模拟模式：自评其答案需进一步论证，标注自己。'
+            this.discussionHistory.push({ type: 'system', content: `${voterDoc.name} 未配置 API Key，本轮弃权。` })
+            continue
           } else {
             const systemPrompt = voterDoc.customPrompt || this.settings.globalSystemPrompt
             const fullPrompt = buildVotePrompt(systemPrompt, this.patientCase, this.discussionHistory, activeDocs, voterDoc, this.linkedConsultations)
@@ -379,7 +379,8 @@ export const useConsultStore = defineStore('consult', {
       const workflow = this.workflow
       try {
         const activeDocs = this.doctors.filter((d) => d.status === 'active')
-        const summarizer = preferredDoctorId ? this.doctors.find((d) => d.id === preferredDoctorId) : (activeDocs[0] || this.doctors[0] || null)
+        const candidates = [...activeDocs, ...this.doctors].filter(d => d.apiKey)
+        const summarizer = candidates.find(d => d.id === preferredDoctorId) || candidates[0] || activeDocs[0] || this.doctors[0] || null
         if (!summarizer) return
         const usedPrompt = this.settings.summaryPrompt || '请根据完整会诊内容，以临床医生口吻输出最终总结：包含核心诊断、依据、鉴别诊断、检查建议、治疗建议、随访计划和风险提示。'
         this.finalSummary = { status: 'pending', doctorId: summarizer.id, doctorName: summarizer.name, content: '', usedPrompt }
@@ -418,7 +419,7 @@ export const useConsultStore = defineStore('consult', {
         this.workflow.phase = 'finished'
         if (activeCount === 1) {
           const winner = this.doctors.find((d) => d.status === 'active')
-          this.discussionHistory.push({ type: 'system', content: `会诊结束：采用 ${winner?.name || ''} 的答案。` })
+          this.discussionHistory.push({ type: 'system', content: `会诊结束：由 ${winner?.name || ''} 汇总讨论，投票不代表医学证据。` })
           this.generateFinalSummary(winner?.id)
         } else {
           this.discussionHistory.push({ type: 'system', content: '会诊结束：无在席医生。' })

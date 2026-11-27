@@ -126,7 +126,9 @@ async function handleImageUpload(file) {
   isRecognizingImage.value = true
   
   try {
+    const workflow = store.workflow
     const base64 = await toBase64(file)
+    if (store.workflow !== workflow) return false
     
     const result = await recognizeImageWithSiliconFlow({
       apiKey: imageRecognitionConfig.value.apiKey,
@@ -136,12 +138,13 @@ async function handleImageUpload(file) {
       imageBase64: base64.raw
     })
 
+    if (store.workflow !== workflow) return false
     const trimmed = (result || '').trim()
 
     if (trimmed) {
       input.value = trimmed
       await nextTick()
-      onSend()
+      if (store.workflow === workflow) onSend()
     } else {
       message.warning('图片识别未返回内容')
     }

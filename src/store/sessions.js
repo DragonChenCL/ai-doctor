@@ -179,7 +179,8 @@ export const useSessionsStore = defineStore('sessions', {
     exportJSON(id) {
       const payload = loadData(id)
       const meta = this.sessions.find((s) => s.id === id)
-      return JSON.stringify({ meta, data: payload }, null, 2)
+      const data = payload ? { ...payload, doctors: (payload.doctors || []).map(({ apiKey, ...doctor }) => doctor) } : null
+      return JSON.stringify({ meta, data }, null, 2)
     },
     getSessionData(id) {
       return loadData(id)

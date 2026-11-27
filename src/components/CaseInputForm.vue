@@ -1,19 +1,20 @@
 <template>
   <a-card title="病例输入" :bordered="false" class="case-input-card">
-    <!-- <a-alert
+    <a-alert
       type="warning"
       show-icon
-      message="【本内容仅供参考，身体不适尽早就医】"
+      message="AI 辅助分析不能替代医生；急重症请及时就医"
+      description="病例与图片将发送给所配置的第三方模型服务商，请使用化名并去除身份证号等敏感信息。"
       style="margin-bottom: 16px;"
-    /> -->
+    />
     <a-form :model="form" layout="vertical" @finish="onSubmit">
       <a-row :gutter="16">
-        <a-col :span="8">
+        <a-col :xs="24" :sm="8">
           <a-form-item label="患者名称" name="name" :rules="[{ required: true, message: '请输入患者名称' }]">
-            <a-input v-model:value="form.name" placeholder="张三" />
+            <a-input v-model:value="form.name" placeholder="建议使用化名，如患者 A" />
           </a-form-item>
         </a-col>
-        <a-col :span="8">
+        <a-col :xs="24" :sm="8">
           <a-form-item label="性别" name="gender">
             <a-select v-model:value="form.gender" placeholder="请选择性别">
               <a-select-option value="male">男</a-select-option>
@@ -22,7 +23,7 @@
             </a-select>
           </a-form-item>
         </a-col>
-        <a-col :span="8">
+        <a-col :xs="24" :sm="8">
           <a-form-item label="年龄" name="age">
             <a-input-number v-model:value="form.age" :min="0" :max="150" placeholder="请输入年龄" style="width: 100%" />
           </a-form-item>

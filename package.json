@@ -1,11 +1,12 @@
 {
   "name": "ai-medical-consultation-panel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A pure front-end Vue 3 + Pinia app that simulates multi-doctor AI consultation rounds.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "node --test tests/*.test.mjs",
     "preview": "vite preview --port 4173"
   },
   "dependencies": {

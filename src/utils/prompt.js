@@ -73,7 +73,7 @@ export function buildFinalSummaryPrompt(systemPrompt, caseInfo, discussionHistor
     user += `\n\n【关联问诊（参考）】\n${linkedText}`
   }
   user += `\n\n【完整会诊纪要】\n${historyText || '（暂无）'}\n\n请用中文给出辅助分析总结，而非确诊或处方。明确区分已知信息、推测与待核实信息；模型投票不代表医学证据。请至少包含：\n1) 可能的诊断方向与不确定性（不得编造概率）；\n2) 主要依据（条目式）；\n3) 鉴别诊断（按可能性排序）；\n4) 进一步检查与理由；\n5) 一般处置建议与需要医生确认的治疗选项（不得提供未经临床核实的个体化处方）；\n6) 随访与复诊时机；\n7) 患者教育、紧急就医警示及需要补充的信息。`
-  return { system: systemPrompt, user }
+  return { system: `${systemPrompt}\n你是 AI 辅助分析工具，不是真实临床医生；请明确不确定性和紧急就医风险。`, user }
 }
 
 export function formatHistoryForProvider(discussionHistory, caseInfo, currentDoctorId) {

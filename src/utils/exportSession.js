@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf'
 import { toPng } from 'html-to-image'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from './safeMarkdown.js'
 
 /**
  * Format discussion history for display
@@ -58,7 +58,7 @@ function generateExportHTML(sessionMeta, sessionData) {
     if (item.type === 'system') {
       discussionHTML += `<div style="text-align: center; color: #8c8c8c; margin: 12px 0; font-size: 12px;">${escapeHTML(item.content)}</div>`
     } else if (item.type === 'doctor') {
-      const content = marked.parse(item.content || '').trim()
+      const content = renderSafeMarkdown(item.content || '').trim()
       discussionHTML += `<div style="margin: 12px 0;">
         <div style="font-weight: 600; color: #1677ff; margin-bottom: 4px;">医生: ${escapeHTML(item.doctorName)}</div>
         <div style="background: #f0f5ff; padding: 10px; border-radius: 4px; border-left: 3px solid #1677ff; font-size: 13px;">
@@ -66,7 +66,7 @@ function generateExportHTML(sessionMeta, sessionData) {
         </div>
       </div>`
     } else if (item.type === 'patient') {
-      const content = marked.parse(item.content || '').trim()
+      const content = renderSafeMarkdown(item.content || '').trim()
       discussionHTML += `<div style="margin: 12px 0;">
         <div style="font-weight: 600; color: #13c2c2; margin-bottom: 4px;">患者: ${escapeHTML(item.author || 'Patient')}</div>
         <div style="background: #e6f7ff; padding: 10px; border-radius: 4px; border-left: 3px solid #13c2c2; font-size: 13px;">
@@ -83,7 +83,7 @@ function generateExportHTML(sessionMeta, sessionData) {
   }
   
   // Format final summary
-  const summaryContent = marked.parse(finalSummary.content || '').trim()
+  const summaryContent = renderSafeMarkdown(finalSummary.content || '').trim()
   
   // Return just the content, styles will be applied separately
   return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 40px; background: white;">
@@ -105,7 +105,7 @@ function generateExportHTML(sessionMeta, sessionData) {
         </div>
         <div style="display: flex; margin-bottom: 8px; font-size: 13px;">
           <div style="font-weight: 600; width: 100px; color: #595959; flex-shrink: 0;">年龄：</div>
-          <div style="flex: 1; color: #262626;">${patientCase.age ?? '—'}</div>
+          <div style="flex: 1; color: #262626;">${escapeHTML(String(patientCase.age ?? '—'))}</div>
         </div>
         ${patientCase.pastHistory ? `<div style="display: flex; margin-bottom: 8px; font-size: 13px;">
           <div style="font-weight: 600; width: 100px; color: #595959; flex-shrink: 0;">既往疾病：</div>

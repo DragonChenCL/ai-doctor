@@ -1,17 +1,14 @@
 import axios from 'axios'
 import { wrapUrlForDev } from './http'
+import { apiEndpoint } from './endpoint.mjs'
+
+const http = axios.create({ timeout: 120000 })
 
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms))
 }
 
-function normalizeBaseUrl(baseUrl, fallback) {
-  const url = (baseUrl || fallback || '').trim()
-  if (!url) return ''
-  return url.endsWith('/') ? url.slice(0, -1) : url
-}
-
-export async function callAI(doctor, fullPrompt, historyForProvider) {
+export async function callAI(doctor, fullPrompt, historyForProvider = []) {
   const { provider, model, apiKey, baseUrl } = doctor
 
   if (!apiKey) {
@@ -19,20 +16,28 @@ export async function callAI(doctor, fullPrompt, historyForProvider) {
     return `【模拟回复 - ${doctor.name}】\n根据提供的病历与讨论历史，我认为需要进一步完善体格检查与辅助检查以明确诊断。`
   }
 
+  let response
   switch (provider) {
     case 'openai':
-      return callOpenAI({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      response = await callOpenAI({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      break
     case 'anthropic':
-      return callAnthropic({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      response = await callAnthropic({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      break
     case 'gemini':
-      return callGemini({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      response = await callGemini({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      break
     case 'siliconflow':
-      return callSiliconFlow({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      response = await callSiliconFlow({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      break
     case 'modelscope':
-      return callModelScope({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      response = await callModelScope({ apiKey, model, fullPrompt, history: historyForProvider, baseUrl })
+      break
     default:
-      throw new Error('Unsupported AI provider')
+      throw new Error('不支持的 AI 服务商')
   }
+  if (typeof response !== 'string' || !response.trim()) throw new Error('模型未返回有效文本，请检查模型配置或服务状态')
+  return response.trim()
 }
 
 async function callOpenAI({ apiKey, model, fullPrompt, history, baseUrl }) {
@@ -43,9 +48,8 @@ async function callOpenAI({ apiKey, model, fullPrompt, history, baseUrl }) {
       .map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: fullPrompt.user }
   ]
-  const root = normalizeBaseUrl(baseUrl, 'https://api.openai.com')
-  const url = wrapUrlForDev(`${root}/v1/chat/completions`)
-  const res = await axios.post(
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.openai.com', 'v1', 'chat/completions'))
+  const res = await http.post(
     url,
     { model, messages, temperature: 0.7 },
     {
@@ -59,15 +63,14 @@ async function callOpenAI({ apiKey, model, fullPrompt, history, baseUrl }) {
 }
 
 async function callAnthropic({ apiKey, model, fullPrompt, history, baseUrl }) {
-  const root = normalizeBaseUrl(baseUrl, 'https://api.anthropic.com')
-  const url = wrapUrlForDev(`${root}/v1/messages`)
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.anthropic.com', 'v1', 'messages'))
   const messages = [
     ...history
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: fullPrompt.user }
   ]
-  const res = await axios.post(
+  const res = await http.post(
     url,
     {
       model,
@@ -87,10 +90,7 @@ async function callAnthropic({ apiKey, model, fullPrompt, history, baseUrl }) {
 }
 
 async function callGemini({ apiKey, model, fullPrompt, history, baseUrl }) {
-  const root = normalizeBaseUrl(baseUrl, 'https://generativelanguage.googleapis.com')
-  const isGoogle = /generativelanguage\.googleapis\.com$/.test(root)
-  const endpoint = `${root}/v1beta/models/${encodeURIComponent(model)}:generateContent`
-  const url = wrapUrlForDev(isGoogle ? `${endpoint}?key=${encodeURIComponent(apiKey)}` : endpoint)
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://generativelanguage.googleapis.com', 'v1beta', `models/${encodeURIComponent(model)}:generateContent`))
 
   const contents = [
     ...history
@@ -99,10 +99,9 @@ async function callGemini({ apiKey, model, fullPrompt, history, baseUrl }) {
     { role: 'user', parts: [{ text: fullPrompt.user }] }
   ]
 
-  const headers = { 'Content-Type': 'application/json' }
-  if (!isGoogle) headers['x-goog-api-key'] = apiKey
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }
 
-  const res = await axios.post(
+  const res = await http.post(
     url,
     {
       systemInstruction: { role: 'system', parts: [{ text: fullPrompt.system }] },
@@ -112,8 +111,7 @@ async function callGemini({ apiKey, model, fullPrompt, history, baseUrl }) {
   )
 
   return (
-    res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-    res.data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('\n') ||
+    res.data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n').trim() ||
     ''
   )
 }
@@ -126,9 +124,8 @@ async function callSiliconFlow({ apiKey, model, fullPrompt, history, baseUrl }) 
       .map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: fullPrompt.user }
   ]
-  const root = normalizeBaseUrl(baseUrl, 'https://api.siliconflow.cn')
-  const url = wrapUrlForDev(`${root}/v1/chat/completions`)
-  const res = await axios.post(
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.siliconflow.cn', 'v1', 'chat/completions'))
+  const res = await http.post(
     url,
     { model, messages, temperature: 0.7 },
     {
@@ -151,9 +148,8 @@ async function callModelScope({ apiKey, model, fullPrompt, history, baseUrl }) {
       .map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: fullPrompt.user }
   ]
-  const root = normalizeBaseUrl(baseUrl, 'https://dashscope.aliyuncs.com')
-  const url = wrapUrlForDev(`${root}/compatible-mode/v1/chat/completions`)
-  const res = await axios.post(
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://dashscope.aliyuncs.com', 'compatible-mode/v1', 'chat/completions'))
+  const res = await http.post(
     url,
     { model, messages, temperature: 0.7 },
     {

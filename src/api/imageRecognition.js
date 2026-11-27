@@ -1,11 +1,8 @@
 import axios from "axios";
 import { wrapUrlForDev } from "./http";
+import { apiEndpoint } from './endpoint.mjs'
 
-function normalizeBaseUrl(baseUrl, fallback) {
-  const url = (baseUrl || fallback || "").trim();
-  if (!url) return "";
-  return url.endsWith("/") ? url.slice(0, -1) : url;
-}
+const http = axios.create({ timeout: 120000 })
 
 function extractTextFromChoice(choice) {
   if (!choice) return "";
@@ -41,8 +38,7 @@ export async function recognizeImageWithSiliconFlow({
   if (!imageBase64) {
     throw new Error("请提供要识别的图片");
   }
-  const root = normalizeBaseUrl(baseUrl, "https://api.siliconflow.cn");
-  const url = wrapUrlForDev(`${root}/v1/chat/completions`);
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, "https://api.siliconflow.cn", "v1", "chat/completions"));
   const payload = {
     model,
     messages: [
@@ -77,7 +73,7 @@ export async function recognizeImageWithSiliconFlow({
     temperature: 0.1,
   };
 
-  const res = await axios.post(url, payload, {
+  const res = await http.post(url, payload, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",

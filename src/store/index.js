@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { callAI } from '../api/callAI'
-import { buildFullPrompt, buildVotePrompt, buildFinalSummaryPrompt, formatHistoryForProvider } from '../utils/prompt'
+import { buildFullPrompt, buildVotePrompt, buildFinalSummaryPrompt } from '../utils/prompt'
 
 function delay(ms) {
   return new Promise((res) => setTimeout(res, ms))
@@ -175,6 +175,7 @@ export const useConsultStore = defineStore('consult', {
       this.doctors = this.doctors.map((d) => ({ ...d, votes: 0 }))
     },
     startConsultation() {
+      if (this.workflow.phase !== 'setup') return
       if (!this.patientCase.name || !this.patientCase.currentProblem) {
         throw new Error('请填写患者名称和本次问题')
       }
@@ -183,7 +184,7 @@ export const useConsultStore = defineStore('consult', {
       }
       // 新的问诊开始时，所有医生恢复为在席状态，清空票数，并取消暂停
       this.doctors = this.doctors.map((d) => ({ ...d, status: 'active', votes: 0 }))
-      this.workflow.phase = 'discussion'
+      this.workflow = { phase: 'discussion', currentRound: 1, roundsWithoutElimination: 0, activeTurn: null, turnQueue: [], paused: false }
       this.workflow.currentRound = 1
       this.workflow.roundsWithoutElimination = 0
       this.workflow.paused = false
@@ -204,12 +205,15 @@ export const useConsultStore = defineStore('consult', {
       }
     },
     async runDiscussionRound() {
+      const workflow = this.workflow
+      const current = () => this.workflow === workflow
       for (const doctorId of this.workflow.turnQueue) {
         const doctor = this.doctors.find((d) => d.id === doctorId)
         if (!doctor || doctor.status !== 'active') continue
 
         // 如被暂停，等待恢复
-        await this.waitWhilePaused()
+        await this.waitWhilePaused(workflow)
+        if (!current()) return
 
         this.workflow.activeTurn = doctorId
         // 提示“正在输入...”，随后在得到回复后移除
@@ -217,8 +221,8 @@ export const useConsultStore = defineStore('consult', {
         const systemPrompt = doctor.customPrompt || this.settings.globalSystemPrompt
         const fullPrompt = buildFullPrompt(systemPrompt, this.patientCase, this.discussionHistory, doctor.id, this.linkedConsultations)
         try {
-          const providerHistory = formatHistoryForProvider(this.discussionHistory, this.patientCase, doctor.id)
-          const response = await callAI(doctor, fullPrompt, providerHistory)
+          const response = await callAI(doctor, fullPrompt, [])
+          if (!current()) return
 
           // 移除“正在输入...”提示
           this.discussionHistory.splice(typingIndex, 1)
@@ -228,25 +232,27 @@ export const useConsultStore = defineStore('consult', {
           this.discussionHistory.push(msg)
           const messageIndex = this.discussionHistory.length - 1
 
-          for (let i = 0; i < response.length; i++) {
-            await this.waitWhilePaused()
-            this.discussionHistory[messageIndex].content += response[i]
+          const step = Math.max(4, Math.ceil(response.length / 100))
+          for (let i = 0; i < response.length; i += step) {
+            await this.waitWhilePaused(workflow)
+            if (!current()) return
+            this.discussionHistory[messageIndex].content += response.slice(i, i + step)
             await delay(15)
           }
 
           this.workflow.activeTurn = null
         } catch (e) {
+          if (!current()) return
           this.workflow.activeTurn = null
           // 确保提示被移除
           try { this.discussionHistory.splice(typingIndex, 1) } catch (err) {}
           this.discussionHistory.push({
-            type: 'doctor',
-            doctorId: doctor.id,
-            doctorName: doctor.name,
+            type: 'system',
             content: `调用 ${doctor.name} 失败: ${e.message || e}`
           })
         }
       }
+      if (!current()) return
       this.workflow.phase = 'voting'
       this.discussionHistory.push({ type: 'system', content: '本轮发言结束，医生团队正在评估答案...' })
       await this.autoVoteAndProceed()
@@ -256,13 +262,15 @@ export const useConsultStore = defineStore('consult', {
     resume() { this.workflow.paused = false },
     togglePause() { this.workflow.paused = !this.workflow.paused },
 
-    async waitWhilePaused() {
-      while (this.workflow.paused) {
+    async waitWhilePaused(workflow = this.workflow) {
+      while (this.workflow === workflow && workflow.paused) {
         await delay(100)
       }
     },
 
     async autoVoteAndProceed() {
+      const workflow = this.workflow
+      const current = () => this.workflow === workflow
       // 使用模型驱动的自动投票（允许投自己）
       this.resetVotes()
       this.lastRoundVotes = []
@@ -293,20 +301,21 @@ export const useConsultStore = defineStore('consult', {
       const activeIds = activeDocs.map((d) => d.id)
 
       for (const voterDoc of activeDocs) {
-        await this.waitWhilePaused()
+        await this.waitWhilePaused(workflow)
+        if (!current()) return
         let targetId = null
         let reason = ''
 
         try {
-          // 如果无 API Key，则使用确定性的回退策略：自投
+          // 模拟回复不应计入真实评估。
           if (!voterDoc.apiKey) {
-            targetId = voterDoc.id
-            reason = '模拟模式：自评其答案需进一步论证，标注自己。'
+            this.discussionHistory.push({ type: 'system', content: `${voterDoc.name} 未配置 API Key，本轮弃权。` })
+            continue
           } else {
             const systemPrompt = voterDoc.customPrompt || this.settings.globalSystemPrompt
             const fullPrompt = buildVotePrompt(systemPrompt, this.patientCase, this.discussionHistory, activeDocs, voterDoc, this.linkedConsultations)
-            const providerHistory = formatHistoryForProvider(this.discussionHistory, this.patientCase, voterDoc.id)
-            const response = await callAI(voterDoc, fullPrompt, providerHistory)
+            const response = await callAI(voterDoc, fullPrompt, [])
+            if (!current()) return
             const parsed = parseVoteJSON(response)
             if (parsed && typeof parsed.targetDoctorId === 'string') {
               targetId = parsed.targetDoctorId
@@ -317,10 +326,10 @@ export const useConsultStore = defineStore('consult', {
           // 忽略错误，使用回退
         }
 
+        if (!current()) return
         if (!targetId || !activeIds.includes(targetId)) {
-          // 若解析失败或模型选择了不在列表中的ID，回退为自标
-          targetId = voterDoc.id
-          if (!reason) reason = '解析失败：默认标注自己。'
+          this.discussionHistory.push({ type: 'system', content: `${voterDoc.name} 的评估失败或无效，本轮弃权。` })
+          continue
         }
 
         const targetDoc = this.doctors.find((d) => d.id === targetId)
@@ -347,7 +356,7 @@ export const useConsultStore = defineStore('consult', {
         await delay(50)
       }
       await delay(200)
-      await this.confirmVote()
+      if (current()) await this.confirmVote()
     },
 
     voteForDoctor(doctorId) {
@@ -367,17 +376,20 @@ export const useConsultStore = defineStore('consult', {
       }
     },
     async generateFinalSummary(preferredDoctorId) {
+      const workflow = this.workflow
       try {
         const activeDocs = this.doctors.filter((d) => d.status === 'active')
-        const summarizer = preferredDoctorId ? this.doctors.find((d) => d.id === preferredDoctorId) : (activeDocs[0] || this.doctors[0] || null)
+        const candidates = [...activeDocs, ...this.doctors].filter(d => d.apiKey)
+        const summarizer = candidates.find(d => d.id === preferredDoctorId) || candidates[0] || activeDocs[0] || this.doctors[0] || null
         if (!summarizer) return
         const usedPrompt = this.settings.summaryPrompt || '请根据完整会诊内容，以临床医生口吻输出最终总结：包含核心诊断、依据、鉴别诊断、检查建议、治疗建议、随访计划和风险提示。'
         this.finalSummary = { status: 'pending', doctorId: summarizer.id, doctorName: summarizer.name, content: '', usedPrompt }
         const fullPrompt = buildFinalSummaryPrompt(usedPrompt, this.patientCase, this.discussionHistory, summarizer.id, this.linkedConsultations)
-        const providerHistory = formatHistoryForProvider(this.discussionHistory, this.patientCase, summarizer.id)
-        const response = await callAI(summarizer, fullPrompt, providerHistory)
+        const response = await callAI(summarizer, fullPrompt, [])
+        if (this.workflow !== workflow) return
         this.finalSummary = { status: 'ready', doctorId: summarizer.id, doctorName: summarizer.name, content: response, usedPrompt }
       } catch (e) {
+        if (this.workflow !== workflow) return
         this.finalSummary = { ...(this.finalSummary || {}), status: 'error', content: `生成总结失败：${e?.message || e}` }
       }
     },
@@ -385,7 +397,7 @@ export const useConsultStore = defineStore('consult', {
       const activeOrElim = this.doctors.filter((d) => d.status === 'active')
       const maxVotes = Math.max(0, ...activeOrElim.map((d) => d.votes))
       const top = activeOrElim.filter((d) => d.votes === maxVotes)
-      if (top.length !== 1 || maxVotes === 0) {
+      if (activeOrElim.length <= 1 || top.length !== 1 || maxVotes === 0 || maxVotes <= activeOrElim.length / 2) {
         this.workflow.roundsWithoutElimination += 1
         return { eliminated: null, message: '评估结束：因意见不一或未明确，本轮未标注不太准确。' }
       }
@@ -407,7 +419,7 @@ export const useConsultStore = defineStore('consult', {
         this.workflow.phase = 'finished'
         if (activeCount === 1) {
           const winner = this.doctors.find((d) => d.status === 'active')
-          this.discussionHistory.push({ type: 'system', content: `会诊结束：采用 ${winner?.name || ''} 的答案。` })
+          this.discussionHistory.push({ type: 'system', content: `会诊结束：由 ${winner?.name || ''} 汇总讨论，投票不代表医学证据。` })
           this.generateFinalSummary(winner?.id)
         } else {
           this.discussionHistory.push({ type: 'system', content: '会诊结束：无在席医生。' })

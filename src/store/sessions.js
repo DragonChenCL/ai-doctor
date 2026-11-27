@@ -137,6 +137,7 @@ export const useSessionsStore = defineStore('sessions', {
     switchTo(id) {
       const meta = this.sessions.find((s) => s.id === id)
       if (!meta) return
+      if (this.currentId && this.currentId !== id && this.sessions.some(s => s.id === this.currentId)) this.saveSnapshotFromConsult()
       this.currentId = id
       saveCurrentId(id)
       const payload = loadData(id)
@@ -151,9 +152,14 @@ export const useSessionsStore = defineStore('sessions', {
         }
         if (payload.patientCase) consult.setPatientCase(payload.patientCase)
         consult.setLinkedConsultations(payload.linkedConsultations || [], { syncPatientInfo: false })
-        if (payload.workflow) consult.workflow = payload.workflow
-        if (payload.discussionHistory) consult.discussionHistory = payload.discussionHistory
-        if (payload.finalSummary) consult.finalSummary = payload.finalSummary
+        if (payload.workflow) consult.workflow = { ...payload.workflow, paused: false, activeTurn: null }
+        if (['discussion', 'voting'].includes(consult.workflow.phase)) {
+          consult.workflow.phase = 'setup'
+          consult.workflow.currentRound = 0
+          consult.workflow.turnQueue = []
+        }
+        if (payload.discussionHistory) consult.discussionHistory = payload.discussionHistory.filter(item => !(item.type === 'system' && String(item.content).endsWith(' 正在输入...')))
+        if (payload.finalSummary) consult.finalSummary = payload.finalSummary.status === 'pending' ? { ...payload.finalSummary, status: 'error', content: '总结生成已中断，请重新开始会诊。' } : payload.finalSummary
         consult.lastRoundVotes = Array.isArray(payload.lastRoundVotes) ? payload.lastRoundVotes : []
       } else {
         consult.consultationName = ''
@@ -179,7 +185,8 @@ export const useSessionsStore = defineStore('sessions', {
     exportJSON(id) {
       const payload = loadData(id)
       const meta = this.sessions.find((s) => s.id === id)
-      return JSON.stringify({ meta, data: payload }, null, 2)
+      const data = payload ? { ...payload, doctors: (payload.doctors || []).map(({ apiKey, ...doctor }) => doctor) } : null
+      return JSON.stringify({ meta, data }, null, 2)
     },
     getSessionData(id) {
       return loadData(id)

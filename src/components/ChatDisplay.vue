@@ -42,7 +42,7 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   history: { type: Array, default: () => [] },
@@ -113,9 +113,9 @@ function getDoctorNameColor(doctorId) {
 
 function renderMarkdown(text) {
   try {
-    return marked.parse(text || '')
+    return renderSafeMarkdown(text || '')
   } catch (e) {
-    return text
+    return renderSafeMarkdown(String(text ?? ''))
   }
 }
 

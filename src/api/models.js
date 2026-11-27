@@ -1,11 +1,8 @@
 import axios from 'axios'
 import { wrapUrlForDev } from './http'
+import { apiEndpoint } from './endpoint.mjs'
 
-function normalizeBaseUrl(baseUrl, fallback) {
-  const url = (baseUrl || fallback || '').trim()
-  if (!url) return ''
-  return url.endsWith('/') ? url.slice(0, -1) : url
-}
+const http = axios.create({ timeout: 20000 })
 
 function toOptions(list) {
   return list.map((m) => ({ label: m.displayName ? `${m.id} (${m.displayName})` : m.id, value: m.id }))
@@ -29,9 +26,8 @@ export async function listModels(provider, apiKey, baseUrl) {
 }
 
 export async function listOpenAIModels(apiKey, baseUrl) {
-  const root = normalizeBaseUrl(baseUrl, 'https://api.openai.com')
-  const url = wrapUrlForDev(`${root}/v1/models`)
-  const res = await axios.get(url, {
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.openai.com', 'v1', 'models'))
+  const res = await http.get(url, {
     headers: { Authorization: `Bearer ${apiKey}` }
   })
   const data = res.data?.data || []
@@ -41,9 +37,8 @@ export async function listOpenAIModels(apiKey, baseUrl) {
 }
 
 export async function listAnthropicModels(apiKey, baseUrl) {
-  const root = normalizeBaseUrl(baseUrl, 'https://api.anthropic.com')
-  const url = wrapUrlForDev(`${root}/v1/models`)
-  const res = await axios.get(url, {
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.anthropic.com', 'v1', 'models'))
+  const res = await http.get(url, {
     headers: {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01'
@@ -57,29 +52,29 @@ export async function listAnthropicModels(apiKey, baseUrl) {
 }
 
 export async function listGeminiModels(apiKey, baseUrl) {
-  const root = normalizeBaseUrl(baseUrl, 'https://generativelanguage.googleapis.com')
-  const isGoogle = /generativelanguage\.googleapis\.com$/.test(root)
-  // Gemini supports v1 and v1beta. Try v1 first then fallback to v1beta.
-  const tryPaths = [`${root}/v1/models`, `${root}/v1beta/models`]
-  let models = []
-  for (const p of tryPaths) {
+  // Honor an explicitly configured API version; otherwise try both versions.
+  const paths = [...new Set(['v1', 'v1beta'].map(version =>
+    apiEndpoint(baseUrl, 'https://generativelanguage.googleapis.com', version, 'models')
+  ))]
+  let lastError
+  for (const p of paths) {
     try {
-      const url = wrapUrlForDev(isGoogle ? `${p}?key=${encodeURIComponent(apiKey)}` : p)
-      const res = await axios.get(url, { headers: isGoogle ? {} : { 'x-goog-api-key': apiKey } })
+      const res = await http.get(wrapUrlForDev(p), { headers: { 'x-goog-api-key': apiKey } })
       const arr = res.data?.models || []
-      models = arr.map((m) => ({ id: (m.name || '').replace(/^models\//, ''), displayName: m.displayName }))
-      break
+      return arr.map((m) => ({ id: (m.name || '').replace(/^models\//, ''), displayName: m.displayName }))
+        .filter(m => m.id)
+        .sort((a, b) => a.id.localeCompare(b.id))
     } catch (e) {
-      // try next
+      lastError = e
+      if (![404, 405].includes(e?.response?.status)) throw e
     }
   }
-  return models.sort((a, b) => a.id.localeCompare(b.id))
+  throw lastError || new Error('无法获取 Gemini 模型列表')
 }
 
 export async function listSiliconFlowModels(apiKey, baseUrl) {
-  const root = normalizeBaseUrl(baseUrl, 'https://api.siliconflow.cn')
-  const url = wrapUrlForDev(`${root}/v1/models`)
-  const res = await axios.get(url, {
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://api.siliconflow.cn', 'v1', 'models'))
+  const res = await http.get(url, {
     headers: { Authorization: `Bearer ${apiKey}` }
   })
   const data = res.data?.data || res.data?.models || []
@@ -93,9 +88,8 @@ export async function listSiliconFlowModels(apiKey, baseUrl) {
 }
 
 export async function listModelScopeModels(apiKey, baseUrl) {
-  const root = normalizeBaseUrl(baseUrl, 'https://dashscope.aliyuncs.com')
-  const url = wrapUrlForDev(`${root}/compatible-mode/v1/models`)
-  const res = await axios.get(url, {
+  const url = wrapUrlForDev(apiEndpoint(baseUrl, 'https://dashscope.aliyuncs.com', 'compatible-mode/v1', 'models'))
+  const res = await http.get(url, {
     headers: { Authorization: `Bearer ${apiKey}` }
   })
   const data = res.data?.data || res.data?.models || []

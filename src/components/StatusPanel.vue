@@ -270,6 +270,7 @@ function resetAll() {
   store.lastRoundVotes = [];
   store.patientCase = {
     name: "",
+    gender: "",
     age: null,
     pastHistory: "",
     currentProblem: "",

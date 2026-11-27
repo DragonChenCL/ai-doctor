@@ -14,7 +14,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   text: { type: String, default: '' },
@@ -40,9 +40,9 @@ const renderAsHtml = computed(() => renderSource.value !== '—')
 const html = computed(() => {
   if (!renderAsHtml.value) return ''
   try {
-    return marked.parse(renderSource.value)
+    return renderSafeMarkdown(renderSource.value)
   } catch (e) {
-    return renderSource.value
+    return renderSafeMarkdown(renderSource.value)
   }
 })
 

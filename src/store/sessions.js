@@ -153,8 +153,12 @@ export const useSessionsStore = defineStore('sessions', {
         if (payload.patientCase) consult.setPatientCase(payload.patientCase)
         consult.setLinkedConsultations(payload.linkedConsultations || [], { syncPatientInfo: false })
         if (payload.workflow) consult.workflow = { ...payload.workflow, paused: false, activeTurn: null }
-        if (['discussion', 'voting'].includes(consult.workflow.phase)) consult.workflow.phase = 'setup'
-        if (payload.discussionHistory) consult.discussionHistory = payload.discussionHistory
+        if (['discussion', 'voting'].includes(consult.workflow.phase)) {
+          consult.workflow.phase = 'setup'
+          consult.workflow.currentRound = 0
+          consult.workflow.turnQueue = []
+        }
+        if (payload.discussionHistory) consult.discussionHistory = payload.discussionHistory.filter(item => !(item.type === 'system' && String(item.content).endsWith(' 正在输入...')))
         if (payload.finalSummary) consult.finalSummary = payload.finalSummary.status === 'pending' ? { ...payload.finalSummary, status: 'error', content: '总结生成已中断，请重新开始会诊。' } : payload.finalSummary
         consult.lastRoundVotes = Array.isArray(payload.lastRoundVotes) ? payload.lastRoundVotes : []
       } else {
